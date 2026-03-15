@@ -93,7 +93,6 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
                 "gallery-dl",
                 "--config", str(GALLERYDL_CONFIG),
                 "--dest", str(dest_dir),
-                "--no-download-archive",
                 url
             ],
             capture_output=True, text=True, timeout=30
