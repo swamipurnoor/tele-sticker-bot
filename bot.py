@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import subprocess
 import uuid
@@ -14,16 +15,41 @@ from signalstickers_client.models import LocalStickerPack, Sticker
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SIGNAL_USERNAME = os.environ.get("SIGNAL_USERNAME")
 SIGNAL_PASSWORD = os.environ.get("SIGNAL_PASSWORD")
+PINTEREST_USERNAME = os.environ.get("PINTEREST_USERNAME")
+PINTEREST_PASSWORD = os.environ.get("PINTEREST_PASSWORD")
+BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "changeme")
 
 STICKER_SIZE = (512, 512)
 TEMP_DIR = Path("temp_stickers")
 TEMP_DIR.mkdir(exist_ok=True)
+
+# gallery-dl config file path
+GALLERYDL_CONFIG = Path("gallery_dl_config.json")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ─── PER-USER SESSION STORAGE ──────────────────────────────────────────────────
 user_sessions: dict[int, list[Path]] = {}
+authenticated_users: set[int] = set()
+
+
+# ─── GALLERY-DL CONFIG ─────────────────────────────────────────────────────────
+
+def write_gallerydl_config():
+    """Write gallery-dl config with Pinterest credentials."""
+    config = {
+        "extractor": {
+            "pinterest": {
+                "username": PINTEREST_USERNAME,
+                "password": PINTEREST_PASSWORD
+            }
+        }
+    }
+    with open(GALLERYDL_CONFIG, "w") as f:
+        json.dump(config, f)
+
+write_gallerydl_config()
 
 
 # ─── IMAGE HELPERS ─────────────────────────────────────────────────────────────
@@ -63,7 +89,13 @@ def extract_pinterest_url(text: str) -> str | None:
 def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
     try:
         result = subprocess.run(
-            ["gallery-dl", "--dest", str(dest_dir), "--no-download-archive", url],
+            [
+                "gallery-dl",
+                "--config", str(GALLERYDL_CONFIG),
+                "--dest", str(dest_dir),
+                "--no-download-archive",
+                url
+            ],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:
@@ -127,28 +159,52 @@ async def process_and_store(user_id: int, input_path: Path, update: Update) -> b
     return True
 
 
+def is_authenticated(user_id: int) -> bool:
+    return user_id in authenticated_users
+
+
 # ─── TELEGRAM HANDLERS ─────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Welcome! You can:\n"
-        "• Send or share Pinterest post URLs\n"
-        "• Forward WhatsApp stickers to this chat\n"
-        "• Send any image directly\n\n"
-        "When you're done, send /done and I'll compile and upload your sticker pack to Signal.\n"
-        "Send /cancel to discard the current session."
-    )
+    user_id = update.effective_user.id
+    if is_authenticated(user_id):
+        await update.message.reply_text(
+            "👋 You're already logged in! You can:\n"
+            "• Send or share Pinterest post URLs\n"
+            "• Forward WhatsApp stickers to this chat\n"
+            "• Send any image directly\n\n"
+            "Send /done when finished to upload to Signal.\n"
+            "Send /cancel to discard the current session."
+        )
+    else:
+        await update.message.reply_text("🔒 Please send the bot password to continue.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages — extract Pinterest URL if present, ignore otherwise."""
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
+    # Check authentication
+    if not is_authenticated(user_id):
+        if text == BOT_PASSWORD:
+            authenticated_users.add(user_id)
+            await update.message.reply_text(
+                "✅ Password correct! Welcome!\n\n"
+                "You can now:\n"
+                "• Send or share Pinterest post URLs\n"
+                "• Forward WhatsApp stickers to this chat\n"
+                "• Send any image directly\n\n"
+                "Send /done when finished to upload to Signal.\n"
+                "Send /cancel to discard the current session."
+            )
+        else:
+            await update.message.reply_text("❌ Wrong password. Try again.")
+        return
+
+    # Extract Pinterest URL from text
     url = extract_pinterest_url(text)
     if not url:
-        # Silently ignore plain text with no Pinterest URL
-        return
+        return  # Silently ignore plain text with no Pinterest URL
 
     await update.message.reply_text("⏳ Downloading and converting...")
 
@@ -164,10 +220,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle stickers forwarded from WhatsApp or any app — including .webp format."""
     user_id = update.effective_user.id
-    sticker = update.message.sticker
+    if not is_authenticated(user_id):
+        await update.message.reply_text("🔒 Please send the bot password first.")
+        return
 
+    sticker = update.message.sticker
     await update.message.reply_text("⏳ Processing sticker...")
 
     file = await context.bot.get_file(sticker.file_id)
@@ -183,17 +241,19 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle any image sent as photo or document — ignores caption text."""
     user_id = update.effective_user.id
+    if not is_authenticated(user_id):
+        await update.message.reply_text("🔒 Please send the bot password first.")
+        return
 
     if update.message.photo:
-        file_obj = update.message.photo[-1]  # highest resolution
+        file_obj = update.message.photo[-1]
         ext = ".jpg"
     elif update.message.document:
         doc = update.message.document
         mime = doc.mime_type or ""
         if not mime.startswith("image/"):
-            return  # Not an image, ignore silently
+            return
         file_obj = doc
         if mime == "image/webp":
             ext = ".webp"
@@ -220,6 +280,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not is_authenticated(user_id):
+        await update.message.reply_text("🔒 Please send the bot password first.")
+        return
+
     stickers = user_sessions.get(user_id, [])
 
     if not stickers:
@@ -250,6 +314,10 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not is_authenticated(user_id):
+        await update.message.reply_text("🔒 Please send the bot password first.")
+        return
+
     stickers = user_sessions.pop(user_id, [])
     for s in stickers:
         try:
@@ -277,3 +345,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
