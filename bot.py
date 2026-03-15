@@ -104,7 +104,7 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
         images = sorted(dest_dir.glob("**/*"), key=lambda p: p.stat().st_mtime, reverse=True)
         for img in images:
             if img.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".bmp"]:
-                return img
+      async          return img
 
         return None
     except subprocess.TimeoutExpired:
@@ -117,7 +117,7 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
 
 # ─── SIGNAL UPLOAD ─────────────────────────────────────────────────────────────
 
-async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
+ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
     try:
         pack = LocalStickerPack()
         pack.title = pack_title
@@ -127,7 +127,8 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
             sticker = Sticker()
             sticker.id = i
             sticker.emoji = "🖼️"
-            sticker.local_path = str(apng_path)
+            with open(apng_path, "rb") as f:
+                sticker.image_data = f.read()
             pack.stickers.append(sticker)
 
         async with StickersClient(SIGNAL_USERNAME, SIGNAL_PASSWORD) as client:
