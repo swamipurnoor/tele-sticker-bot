@@ -128,7 +128,7 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
             sticker.id = i
             sticker.emoji = "🖼️"
             sticker.local_path = str(apng_path)
-            pack.stickers[i] = sticker
+            pack.stickers.append(sticker)
 
         async with StickersClient(SIGNAL_USERNAME, SIGNAL_PASSWORD) as client:
             await client.upload_pack(pack)
@@ -141,7 +141,7 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
 
 # ─── SHARED HELPER ─────────────────────────────────────────────────────────────
 
-async def process_and_store(user_id: int, input_path: Path, update: Update) -> bool:
+as input_path: Path, update: Update) -> bool:
     apng_path = TEMP_DIR / f"{uuid.uuid4()}.png"
     success = convert_to_apng(input_path, apng_path)
 
