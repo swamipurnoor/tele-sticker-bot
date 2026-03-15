@@ -141,7 +141,7 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
 
 # ─── SHARED HELPER ─────────────────────────────────────────────────────────────
 
-as input_path: Path, update: Update) -> bool:
+async def process_and_store(user_id: int, input_path: Path, update: Update) -> bool:
     apng_path = TEMP_DIR / f"{uuid.uuid4()}.png"
     success = convert_to_apng(input_path, apng_path)
 
