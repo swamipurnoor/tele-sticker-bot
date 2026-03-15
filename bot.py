@@ -115,7 +115,7 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
         return None
 
 
-# ─── SIGNAL UPLOAD ─────────────────────────────────────────────────────────────
+# ─── SIGNAL UPLOAD ─────────────────────────────────────────────────────────────async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
 
 async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
     try:
@@ -138,7 +138,6 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
     except Exception as e:
         logger.error(f"Signal upload failed: {e}")
         return None
-
 
 # ─── SHARED HELPER ─────────────────────────────────────────────────────────────
 
