@@ -104,7 +104,7 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
         images = sorted(dest_dir.glob("**/*"), key=lambda p: p.stat().st_mtime, reverse=True)
         for img in images:
             if img.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".bmp"]:
-      async          return img
+                return img
 
         return None
     except subprocess.TimeoutExpired:
