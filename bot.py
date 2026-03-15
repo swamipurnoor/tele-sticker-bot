@@ -123,18 +123,18 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
         pack.title = pack_title
         pack.author = author
 
-        for i, apng_path in enumerate(apng_paths):
+        for apng_path in apng_paths:
             sticker = Sticker()
-            sticker.id = i
+            sticker.id = pack.nb_stickers
             sticker.emoji = "🖼️"
             with open(apng_path, "rb") as f:
                 sticker.image_data = f.read()
-            pack.stickers.append(sticker)
+            pack._addsticker(sticker)
 
         async with StickersClient(SIGNAL_USERNAME, SIGNAL_PASSWORD) as client:
-            await client.upload_pack(pack)
+            pack_id, pack_key = await client.upload_pack(pack)
 
-        return f"https://signal.art/addstickers/#pack_id={pack.pack_id}&pack_key={pack.pack_key}"
+        return f"https://signal.art/addstickers/#pack_id={pack_id}&pack_key={pack_key}"
     except Exception as e:
         logger.error(f"Signal upload failed: {e}")
         return None
