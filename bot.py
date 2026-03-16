@@ -3,7 +3,9 @@ import json
 import logging
 import subprocess
 import uuid
+import threading
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -23,7 +25,6 @@ STICKER_SIZE = (512, 512)
 TEMP_DIR = Path("temp_stickers")
 TEMP_DIR.mkdir(exist_ok=True)
 
-# gallery-dl config file path
 GALLERYDL_CONFIG = Path("gallery_dl_config.json")
 
 logging.basicConfig(level=logging.INFO)
@@ -34,10 +35,27 @@ user_sessions: dict[int, list[Path]] = {}
 authenticated_users: set[int] = set()
 
 
+# ─── HEALTH SERVER (keeps Render alive) ────────────────────────────────────────
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP logs
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+
 # ─── GALLERY-DL CONFIG ─────────────────────────────────────────────────────────
 
 def write_gallerydl_config():
-    """Write gallery-dl config with Pinterest credentials."""
     config = {
         "extractor": {
             "pinterest": {
@@ -78,7 +96,6 @@ def convert_to_apng(input_path: Path, output_path: Path) -> bool:
 # ─── PINTEREST DOWNLOAD ────────────────────────────────────────────────────────
 
 def extract_pinterest_url(text: str) -> str | None:
-    """Extract Pinterest URL from any text, handles share messages like 'Take a look 📌 https://pin.it/xxx'"""
     for word in text.split():
         word = word.strip(".,!?\"'")
         if any(domain in word.lower() for domain in ["pinterest.com", "pinterest.co", "pin.it"]):
@@ -115,7 +132,7 @@ def download_pinterest_image(url: str, dest_dir: Path) -> Path | None:
         return None
 
 
-# ─── SIGNAL UPLOAD ─────────────────────────────────────────────────────────────async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
+# ─── SIGNAL UPLOAD ─────────────────────────────────────────────────────────────
 
 async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str) -> str | None:
     try:
@@ -138,6 +155,7 @@ async def upload_to_signal(apng_paths: list[Path], pack_title: str, author: str)
     except Exception as e:
         logger.error(f"Signal upload failed: {e}")
         return None
+
 
 # ─── SHARED HELPER ─────────────────────────────────────────────────────────────
 
@@ -183,14 +201,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # Check authentication
     if not is_authenticated(user_id):
         if text == BOT_PASSWORD:
             authenticated_users.add(user_id)
             await update.message.reply_text(
                 "✅ Password correct! Welcome!\n\n"
                 "You can now:\n"
-                "• Send or share Pinterest post URLs\n"
                 "• Forward WhatsApp stickers to this chat\n"
                 "• Send any image directly\n\n"
                 "Send /done when finished to upload to Signal.\n"
@@ -200,10 +216,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Wrong password. Try again.")
         return
 
-    # Extract Pinterest URL from text
     url = extract_pinterest_url(text)
     if not url:
-        return  # Silently ignore plain text with no Pinterest URL
+        return
 
     await update.message.reply_text("⏳ Downloading and converting...")
 
@@ -329,6 +344,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
+    # Start health server in background to keep Render alive
+    threading.Thread(target=run_health_server, daemon=True).start()
+    logger.info("Health server started")
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
