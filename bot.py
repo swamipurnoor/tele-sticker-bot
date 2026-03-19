@@ -85,16 +85,20 @@ def convert_to_apng(input_path: Path, output_path: Path) -> bool:
             img = img.convert("RGBA")
             img = center_crop_to_square(img)
             img = img.resize(STICKER_SIZE, Image.LANCZOS)
-            # Signal requires PNG under 300KB
-            img.save(output_path, format="PNG", optimize=True, compress_level=6)
-            # Check file size
-            if output_path.stat().st_size > 300 * 1024:
-                img.save(output_path, format="PNG", optimize=True, compress_level=9)
+            
+            # Try progressively smaller sizes until under 300KB
+            size = 512
+            while size >= 256:
+                img_resized = img.resize((size, size), Image.LANCZOS)
+                img_resized.save(output_path, format="PNG", optimize=True, compress_level=9)
+                if output_path.stat().st_size <= 300 * 1024:
+                    break
+                size -= 32
+                
         return True
     except Exception as e:
         logger.error(f"Image conversion failed: {e}")
         return False
-
 
 # ─── PINTEREST DOWNLOAD ────────────────────────────────────────────────────────
 
