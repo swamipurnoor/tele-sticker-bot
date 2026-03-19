@@ -79,14 +79,17 @@ def center_crop_to_square(img: Image.Image) -> Image.Image:
     top = (h - side) // 2
     return img.crop((left, top, left + side, top + side))
 
-
 def convert_to_apng(input_path: Path, output_path: Path) -> bool:
     try:
         with Image.open(input_path) as img:
             img = img.convert("RGBA")
             img = center_crop_to_square(img)
             img = img.resize(STICKER_SIZE, Image.LANCZOS)
-            img.save(output_path, format="PNG")
+            # Signal requires PNG under 300KB
+            img.save(output_path, format="PNG", optimize=True, compress_level=6)
+            # Check file size
+            if output_path.stat().st_size > 300 * 1024:
+                img.save(output_path, format="PNG", optimize=True, compress_level=9)
         return True
     except Exception as e:
         logger.error(f"Image conversion failed: {e}")
