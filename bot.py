@@ -351,21 +351,26 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # Start health server in background to keep Render alive
     threading.Thread(target=run_health_server, daemon=True).start()
     logger.info("Health server started")
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    while True:
+        try:
+            app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("done", done))
-    app.add_handler(CommandHandler("cancel", cancel))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_image))
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("done", done))
+            app.add_handler(CommandHandler("cancel", cancel))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+            app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
+            app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_image))
 
-    logger.info("Bot is running...")
-    app.run_polling()
+            logger.info("Bot is running...")
+            app.run_polling(timeout=30, read_timeout=30, write_timeout=30, connect_timeout=30)
+        except Exception as e:
+            logger.error(f"Bot crashed: {e}, restarting in 5 seconds...")
+            import time
+            time.sleep(5)
 
 
 if __name__ == "__main__":
