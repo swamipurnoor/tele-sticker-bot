@@ -20,6 +20,7 @@ SIGNAL_PASSWORD = os.environ.get("SIGNAL_PASSWORD")
 PINTEREST_USERNAME = os.environ.get("PINTEREST_USERNAME")
 PINTEREST_PASSWORD = os.environ.get("PINTEREST_PASSWORD")
 BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "changeme")
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")  # ← CHANGE 1: added
 
 STICKER_SIZE = (512, 512)
 TEMP_DIR = Path("temp_stickers")
@@ -34,14 +35,40 @@ logger = logging.getLogger(__name__)
 user_sessions: dict[int, list[Path]] = {}
 authenticated_users: set[int] = set()
 
+# ─── WEBHOOK STATE ─────────────────────────────────────────────────────────────
+# ← CHANGE 2: two module-level refs so the HTTP thread can forward updates
+telegram_app = None
+main_event_loop = None
 
-# ─── HEALTH SERVER (keeps Render alive) ────────────────────────────────────────
+
+# ─── HEALTH SERVER (keeps Render alive + receives webhook updates) ──────────────
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
+
+    # ← CHANGE 3: new method — Telegram POSTs updates here
+    def do_POST(self):
+        if self.path == f"/{TELEGRAM_TOKEN}" and telegram_app and main_event_loop:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body.decode("utf-8"))
+                update = Update.de_json(data, telegram_app.bot)
+                import asyncio
+                asyncio.run_coroutine_threadsafe(
+                    telegram_app.process_update(update),
+                    main_event_loop,
+                )
+                self.send_response(200)
+            except Exception as e:
+                logger.error(f"Webhook processing error: {e}")
+                self.send_response(500)
+        else:
+            self.send_response(404)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass  # Suppress HTTP logs
@@ -357,9 +384,13 @@ def main():
     import asyncio
 
     async def run_bot():
+        global telegram_app, main_event_loop          # ← CHANGE 4: grab the running loop
+        main_event_loop = asyncio.get_running_loop()  #   so the HTTP thread can schedule updates
+
         while True:
             try:
                 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+                telegram_app = app                    # ← CHANGE 5: expose app to HealthHandler
 
                 app.add_handler(CommandHandler("start", start))
                 app.add_handler(CommandHandler("done", done))
@@ -371,10 +402,14 @@ def main():
                 logger.info("Bot is running...")
                 async with app:
                     await app.start()
-                    await app.updater.start_polling(timeout=30)
+                    # ← CHANGE 6: register webhook instead of polling
+                    webhook_url = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
+                    await app.bot.set_webhook(webhook_url)
+                    logger.info(f"Webhook registered: {webhook_url}")
                     await asyncio.Event().wait()  # run forever
             except Exception as e:
                 logger.error(f"Bot crashed: {e}, restarting in 5 seconds...")
+                telegram_app = None                   # ← CHANGE 7: clear ref on crash
                 await asyncio.sleep(5)
 
     asyncio.run(run_bot())
@@ -382,4 +417,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
