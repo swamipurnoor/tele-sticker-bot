@@ -58,9 +58,9 @@ class HealthHandler(BaseHTTPRequestHandler):
                 data = json.loads(body.decode("utf-8"))
                 update = Update.de_json(data, telegram_app.bot)
                 import asyncio
-                asyncio.run_coroutine_threadsafe(
-                    telegram_app.process_update(update),
-                    main_event_loop,
+                main_event_loop.call_soon_threadsafe(
+                    telegram_app.update_queue.put_nowait,
+                    update,
                 )
                 self.send_response(200)
             except Exception as e:
